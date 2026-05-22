@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>玉山銀行後端實作題 - 金融商品喜好紀錄系統</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://unpkg.com/vue-router@4/dist/vue-router.global.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 1100px; margin: 0 auto; padding: 30px; color: #333; background-color: #f8f9fa; }
+    h1 { color: #117a65; border-bottom: 2px solid #117a65; padding-bottom: 10px; }
+    nav { background: #ffffff; padding: 15px; margin-bottom: 25px; border-radius: 6px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    nav a { text-decoration: none; color: #117a65; font-weight: bold; margin-right: 15px; }
+    nav a.router-link-active { color: #0b5345; text-decoration: underline; }
+    .card { background: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+    table { width: 100%; border-collapse: collapse; margin-top: 15px; background: #fff; }
+    th, td { border: 1px solid #e0e0e0; padding: 12px; text-align: left; }
+    th { background-color: #e8f8f5; color: #117a65; }
+    .btn { padding: 8px 14px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 5px;}
+    .btn-primary { background-color: #117a65; color: white; }
+    .btn-danger { background-color: #e74c3c; color: white; }
+    .btn-secondary { background-color: #95a5a6; color: white; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+    .form-group input, .form-group select { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+    .form-group input[readonly] { background-color: #eaeded; }
+    .summary-box { background-color: #fcf3cf; padding: 15px; border-radius: 4px; margin-top: 15px; border-left: 5px solid #f1c40f; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>玉山銀行後端工程師實作題 - 喜好系統</h1>
+    <nav>
+      <router-link to="/">📋 查詢喜好金融商品清單</router-link>
+      <router-link to="/add">➕ 新增喜好金融商品</router-link>
+    </nav>
+    <router-view></router-view>
+  </div>
+
+  <script>
+    const API_BASE = 'http://localhost:8080/api/favorites';
+
+    const ProductList = {
+      template: `
+        <div class="card">
+          <h2>喜好金融商品清單</h2>
+          <table v-if="favoriteList.length > 0">
+            <thead>
+              <tr>
+                <th>產品名稱</th><th>預計扣款帳號</th><th>預計扣款總金額</th><th>總手續費用</th><th>使用者聯絡電子信箱</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in favoriteList" :key="item.sn">
+                <td>{{ item.productName }}</td><td>{{ item.account }}</td><td>$ {{ item.totalAmount }}</td><td>$ {{ item.totalFee }}</td><td>{{ item.email }}</td>
+                <td>
+                  <button class="btn btn-primary" @click="editItem(item.sn)">更改</button>
+                  <button class="btn btn-danger" @click="deleteItem(item.sn)">刪除</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else style="text-align: center; color: #7f8c8d; padding: 20px;">目前無資料</div>
+        </div>
+      `,
+      data() { return { favoriteList: [] } },
+      mounted() { this.fetchFavorites(); },
+      methods: {
+        async fetchFavorites() {
+          try {
+            const res = await axios.get(API_BASE);
+            this.favoriteList = res.data;
+          } catch (err) { alert("API 連線失敗，請確認 Spring Boot 已啟動"); }
+        },
+        editItem(sn) { this.$router.push(`/edit/${sn}`); },
+        async deleteItem(sn) {
+          if (confirm("確定要刪除嗎？")) {
+            await axios.delete(`${API_BASE}/${sn}`);
+            this.fetchFavorites();
+          }
+        }
+      }
+    };
+
+    const ProductForm = {
+      template: `
+        <div class="card">
+          <h2>{{ isEdit ? '更改喜好金融商品資訊' : '新增喜好金融商品' }}</h2>
+          <form @submit.prevent="handleSubmit">
+            <div class="form-group"><label>預設使用者 ID：</label><input v-model="userId" :readonly="isEdit" required></div>
+            <div class="form-group">
+              <label>選擇金融商品：</label>
+              <select v-model="selectedProductNo" @change="handleProductChange" :disabled="isEdit" required>
+                <option value="">-- 請選擇 --</option>
+                <option v-for="p in productOptions" :key="p.no" :value="p.no">{{ p.productName }} (價格: {{ p.price }})</option>
+              </select>
+            </div>
+            <div class="form-group" v-if="selectedProductNo"><label>單價：</label><input :value="currentProduct.price" readonly></div>
+            <div class="form-group"><label>購買數量：</label><input type="number" v-model.number="form.purchaseQuantity" min="1" required @input="calculateTotals"></div>
+            <div class="form-group"><label>預計要扣款的帳號：</label><input v-model="form.account" required></div>
+            <div class="summary-box" v-if="selectedProductNo && form.purchaseQuantity > 0">
+              <strong>🧮 試算結果：</strong><p>總手續費用：$ {{ computedFee }}</p><p>預計扣款總金額：$ {{ computedAmount }}</p>
+            </div>
+            <button type="submit" class="btn btn-primary">儲存</button>
+            <button type="button" class="btn btn-secondary" @click="$router.push('/')">取消</button>
+          </form>
+        </div>
+      `,
+      data() { return { isEdit: false, sn: null, userId: 'A1236456789', selectedProductNo: '', productOptions: [], currentProduct: { price: 0, feeRate: 0 }, form: { purchaseQuantity: 1, account: '' }, computedFee: 0, computedAmount: 0 } },
+      mounted() {
+        this.fetchProductOptions().then(() => {
+          if (this.$route.params.sn) { this.isEdit = true; this.sn = this.$route.params.sn; this.fetchFavoriteDetail(); }
+        });
+      },
+      methods: {
+        async fetchProductOptions() { const res = await axios.get(`${API_BASE}/products`); this.productOptions = res.data; },
+        handleProductChange() { this.currentProduct = this.productOptions.find(p => p.no === this.selectedProductNo) || { price: 0, feeRate: 0 }; this.calculateTotals(); },
+        calculateTotals() {
+          if (!this.selectedProductNo) return;
+          const basePrice = this.currentProduct.price * this.form.purchaseQuantity;
+          this.computedFee = Math.round(basePrice * this.currentProduct.feeRate);
+          this.computedAmount = basePrice + this.computedFee;
+        },
+        async fetchFavoriteDetail() {
+          const res = await axios.get(`${API_BASE}/${this.sn}`);
+          this.userId = res.data.userId; this.selectedProductNo = res.data.productNo; this.form.purchaseQuantity = res.data.purchaseQuantity; this.form.account = res.data.account;
+          this.currentProduct = { price: res.data.price, feeRate: res.data.feeRate }; this.calculateTotals();
+        },
+        async handleSubmit() {
+          const payload = { userId: this.userId, productNo: this.selectedProductNo, purchaseQuantity: this.form.purchaseQuantity, account: this.form.account };
+          this.isEdit ? await axios.put(`${API_BASE}/${this.sn}`, payload) : await axios.post(API_BASE, payload);
+          this.$router.push('/');
+        }
+      }
+    };
+
+    const router = VueRouter.createRouter({ history: VueRouter.createWebHashHistory(), routes: [{ path: '/', component: ProductList }, { path: '/add', component: ProductForm }, { path: '/edit/:sn', component: ProductForm }] });
+    const app = Vue.createApp({}); app.use(router); app.mount('#app');
+  </script>
+</body>
+</html>
